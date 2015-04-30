@@ -16,8 +16,9 @@ use properties::longhands::clip::computed_value::ClipRect;
 use properties::longhands::text_shadow::computed_value::TextShadow;
 use properties::longhands::text_shadow::computed_value::T as TextShadowList;
 use properties::longhands::background_position::computed_value::T as BackgroundPosition;
+use properties::longhands::transform::computed_value::ComputedMatrix;
 use properties::longhands::transition_property;
-use values::computed::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, LengthOrPercentage, Length, Time};
+use values::computed::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, LengthOrPercentage, LengthAndPercentage, Length, Time};
 use values::CSSFloat;
 use cssparser::{RGBA, Color};
 
@@ -136,6 +137,7 @@ impl PropertyAnimation {
             [Right; get_positionoffsets; right],
             [TextIndent; get_inheritedtext; text_indent],
             [Top; get_positionoffsets; top],
+            [Transform; get_effects; transform],
             [VerticalAlign; get_box; vertical_align],
             [Visibility; get_inheritedbox; visibility],
             [Width; get_box; width],
@@ -222,6 +224,7 @@ impl PropertyAnimation {
             [TextIndent; mutate_inheritedtext; text_indent],
             [TextShadow; mutate_effects; text_shadow],
             [Top; mutate_positionoffsets; top],
+            [Transform; mutate_effects; transform],
             [VerticalAlign; mutate_box; vertical_align],
             [Visibility; mutate_inheritedbox; visibility],
             [Width; mutate_box; width],
@@ -276,6 +279,7 @@ enum AnimatedProperty {
     TextIndent(LengthOrPercentage, LengthOrPercentage),
     TextShadow(TextShadowList, TextShadowList),
     Top(LengthOrPercentageOrAuto, LengthOrPercentageOrAuto),
+    Transform(Option<ComputedMatrix>, Option<ComputedMatrix>),
     VerticalAlign(VerticalAlign, VerticalAlign),
     Visibility(Visibility, Visibility),
     Width(LengthOrPercentageOrAuto, LengthOrPercentageOrAuto),
@@ -327,6 +331,7 @@ impl AnimatedProperty {
             AnimatedProperty::Opacity(ref a, ref b) => a == b,
             AnimatedProperty::OutlineWidth(ref a, ref b) => a == b,
             AnimatedProperty::TextShadow(ref a, ref b) => a == b,
+            AnimatedProperty::Transform(ref a, ref b) => a == b,
             AnimatedProperty::VerticalAlign(ref a, ref b) => a == b,
             AnimatedProperty::Visibility(ref a, ref b) => a == b,
             AnimatedProperty::WordSpacing(ref a, ref b) => a == b,
@@ -357,6 +362,13 @@ impl <T> Interpolate for Option<T> where T:Interpolate {
             }
             (_, _) => None
         }
+    }
+}
+
+impl <T> Interpolate for (T, T) where T:Interpolate {
+    #[inline]
+    fn interpolate(&self, other: &(T, T), time: f64) -> Option<(T, T)> {
+        self.0.interpolate(&other.0, time).and_then(|a| self.1.interpolate(&other.1, time).and_then(|b| Some((a, b)) ) )
     }
 }
 
@@ -547,6 +559,14 @@ impl Interpolate for LengthOrPercentageOrNone {
     }
 }
 
+impl Interpolate for LengthAndPercentage {
+    #[inline]
+    fn interpolate(&self, other: &LengthAndPercentage, time: f64)
+                   -> Option<LengthAndPercentage> {
+        Some(*self + (*other + (*self * (-1.0 as CSSFloat))) * time)
+    }
+}
+
 impl Interpolate for LineHeight {
     #[inline]
     fn interpolate(&self, other: &LineHeight, time: f64)
@@ -650,6 +670,120 @@ impl Interpolate for TextShadowList {
             Ordering::Less => other.0.iter().chain(repeat(&zero)).zip(other.0.iter()).map(interpolate_each).collect(),
             _ => self.0.iter().zip(other.0.iter().chain(repeat(&zero))).map(interpolate_each).collect(),
         }))
+    }
+}
+
+#[derive(Copy, Clone)]
+struct DecomposedMatrix {
+    m11: CSSFloat,
+    m12: CSSFloat,
+    m21: CSSFloat,
+    m22: CSSFloat,
+    translation: (LengthAndPercentage, LengthAndPercentage),
+    scale: (CSSFloat, CSSFloat),
+    angle: CSSFloat,
+}
+
+fn unmatrix(input: &ComputedMatrix) -> Option<DecomposedMatrix> {
+    let mut matrix = DecomposedMatrix {
+        m11: input.m11,
+        m12: input.m12,
+        m21: input.m21,
+        m22: input.m22,
+        translation: (input.m31, input.m32),
+        scale: ((input.m11 * input.m11 + input.m12 * input.m12).sqrt(), (input.m21 * input.m21 + input.m22 * input.m22).sqrt()),
+        angle: 0.0
+    };
+
+    if matrix.m11 * matrix.m22 - matrix.m21 * matrix.m12  < 0.0 {
+        if matrix.m11 < matrix.m22 {
+            matrix.scale.0 = -matrix.scale.0;
+        } else {
+            matrix.scale.1 = -matrix.scale.1;
+        }
+    }
+
+    if matrix.scale.0 != 0.0 {
+        matrix.m11 *= 1.0 / matrix.scale.0;
+        matrix.m12 *= 1.0 / matrix.scale.0;
+    }
+
+    if matrix.scale.1 != 0.0 {
+        matrix.m21 *= 1.0 / matrix.scale.1;
+        matrix.m22 *= 1.0 / matrix.scale.1;
+    }
+    
+    matrix.angle = matrix.m12.atan2(matrix.m11);
+
+    if matrix.angle != 0.0 {
+        let sn = -matrix.m12;
+        let cs = matrix.m11;
+        let tmp = matrix.clone();
+        matrix.m11 = cs * tmp.m11 + sn * tmp.m21;
+        matrix.m12 = cs * tmp.m12 + sn * tmp.m22;
+        matrix.m21 = -sn * tmp.m11 + cs * tmp.m21;
+        matrix.m22 = -sn * tmp.m12 + cs * tmp.m22;
+    }
+
+    Some(matrix)
+}
+
+fn rematrix(input: DecomposedMatrix) -> ComputedMatrix {
+    let mut matrix = ComputedMatrix {
+        m11: input.m11,
+        m12: input.m12,
+        m21: input.m21,
+        m22: input.m22,
+        m31: input.translation.0 * input.m11 + input.translation.1 * input.m21,
+        m32: input.translation.0 * input.m12 + input.translation.1 * input.m22,
+    };
+    matrix.rotate(input.angle);
+    matrix.scale(input.scale.0, input.scale.1);
+    matrix
+}
+
+impl Interpolate for ComputedMatrix {
+    #[inline]
+    fn interpolate(&self, other: &ComputedMatrix, time: f64)
+                   -> Option<ComputedMatrix> {
+        let a = unmatrix(self);
+        let b = unmatrix(other);
+
+        match (a, b) {
+            (Some(ref mut a), Some(ref mut b)) => {
+                if (a.scale.0 < 0.0 && b.scale.1 < 0.0) || (a.scale.1 < 0.0 && b.scale.0 < 0.0) {
+                    a.scale.0 = -a.scale.0;
+                    a.scale.1 = -a.scale.1;
+                    a.angle += if a.angle < 0.0 { 180.0 } else { -180.0 };
+                }
+                if a.angle == 0.0 { a.angle = 360.0; }
+                if b.angle == 0.0 { b.angle = 360.0; }
+                if (a.angle - b.angle).abs() > 180.0 {
+                    if a.angle > b.angle { a.angle -= 360.0; } else { b.angle -= 360.0; }
+                }
+                a.interpolate(&b, time).and_then(|value| Some(rematrix(value)) )
+            },
+            (_, _) => None
+        }
+    }
+}
+
+impl Interpolate for DecomposedMatrix {
+    #[inline]
+    fn interpolate(&self, other: &DecomposedMatrix, time: f64)
+                   -> Option<DecomposedMatrix> {
+        match (self.m11.interpolate(&other.m11, time),
+               self.m12.interpolate(&other.m12, time),
+               self.m21.interpolate(&other.m21, time),
+               self.m22.interpolate(&other.m22, time),
+               self.translation.interpolate(&other.translation, time),
+               self.scale.interpolate(&other.scale, time),
+               self.angle.interpolate(&other.angle, time)) {
+            (Some(m11), Some(m12), Some(m21), Some(m22), Some(translation), Some(scale), Some(angle)) => {
+                Some(DecomposedMatrix { m11: m11, m12: m12, m21: m21, m22: m22, translation: translation, scale: scale, angle: angle })
+            },
+            _ => None,
+        }
     }
 }
 

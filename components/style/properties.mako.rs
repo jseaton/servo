@@ -3903,6 +3903,7 @@ pub mod longhands {
                 TextIndent,
                 TextShadow,
                 Top,
+                Transform,
                 VerticalAlign,
                 Visibility,
                 Width,
@@ -3910,7 +3911,7 @@ pub mod longhands {
                 ZIndex,
             }
 
-            pub static ALL_TRANSITION_PROPERTIES: [TransitionProperty; 44] = [
+            pub static ALL_TRANSITION_PROPERTIES: [TransitionProperty; 45] = [
                 TransitionProperty::BackgroundColor,
                 TransitionProperty::BackgroundPosition,
                 TransitionProperty::BorderBottomColor,
@@ -3950,6 +3951,7 @@ pub mod longhands {
                 TransitionProperty::TextIndent,
                 TransitionProperty::TextShadow,
                 TransitionProperty::Top,
+                TransitionProperty::Transform,
                 TransitionProperty::VerticalAlign,
                 TransitionProperty::Visibility,
                 TransitionProperty::Width,
@@ -4000,6 +4002,7 @@ pub mod longhands {
                         TransitionProperty::TextIndent => dest.write_str("text-indent"),
                         TransitionProperty::TextShadow => dest.write_str("text-shadow"),
                         TransitionProperty::Top => dest.write_str("top"),
+                        TransitionProperty::Transform => dest.write_str("transform"),
                         TransitionProperty::VerticalAlign => dest.write_str("vertical-align"),
                         TransitionProperty::Visibility => dest.write_str("visibility"),
                         TransitionProperty::Width => dest.write_str("width"),
@@ -4076,6 +4079,7 @@ pub mod longhands {
                 "text-indent" => Ok(TransitionProperty::TextIndent),
                 "text-shadow" => Ok(TransitionProperty::TextShadow),
                 "top" => Ok(TransitionProperty::Top),
+                "transform" => Ok(TransitionProperty::Transform),
                 "vertical-align" => Ok(TransitionProperty::VerticalAlign),
                 "visibility" => Ok(TransitionProperty::Visibility),
                 "width" => Ok(TransitionProperty::Width),
